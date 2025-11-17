@@ -3,7 +3,6 @@ document.getElementById('startSpeedTest').addEventListener('click', runSpeedTest
 // --- Configuration ---
 const DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10 Megabytes
 const DOWNLOAD_URL = `https://speed.hetzner.de/10MB.bin?r=${Math.random()}`; 
-// Note: httpbin.org is good for testing, but may throttle. Use a dedicated service for professional tests.
 const UPLOAD_URL = 'https://httpbin.org/post'; 
 
 /**
@@ -23,7 +22,9 @@ async function downloadTest() {
             cache: 'no-store'
         });
 
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}. Source may be down or URL is invalid.`);
+        }
 
         const blob = await response.blob();
         const endTime = performance.now();
@@ -31,11 +32,13 @@ async function downloadTest() {
         const sizeBytes = blob.size || DOWNLOAD_SIZE_BYTES; 
         
         const speedMbps = bytesToMbps(sizeBytes / durationSeconds);
+
         document.getElementById('downloadSpeed').textContent = `${speedMbps} Mbps`;
         return { success: true, speedMbps };
 
     } catch (error) {
         document.getElementById('downloadSpeed').textContent = `ERROR: ${error.message}`;
+        console.error('Download Test Failed:', error);
         return { success: false };
     }
 }
@@ -58,7 +61,9 @@ async function uploadTest() {
             headers: { 'Content-Type': 'application/octet-stream' }
         });
 
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        if (!response.ok) {
+             throw new Error(`HTTP error! Status: ${response.status}. Public upload endpoint failed to accept data.`);
+        }
 
         await response.text(); 
         
@@ -72,6 +77,7 @@ async function uploadTest() {
 
     } catch (error) {
         document.getElementById('uploadSpeed').textContent = `ERROR: ${error.message}`;
+        console.error('Upload Test Failed:', error);
         return { success: false };
     }
 }
@@ -94,10 +100,12 @@ async function latencyTest(iterations = 10) {
         return { success: true, avgRtt };
 
     } catch (error) {
-        document.getElementById('rttLatency').textContent = `ERROR: ${error.message}`;
+        document.getElementById('rttLatency').textContent = `ERROR: Failed to reach server.`;
+        console.error('Latency Test Failed:', error);
         return { success: false };
     }
 }
+
 
 // --- Main Runner Function ---
 async function runSpeedTest() {
