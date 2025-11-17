@@ -3,16 +3,22 @@ document.getElementById('startJitterTest').addEventListener('click', runJitterTe
 const JITTER_STATUS = document.getElementById('jitterStatus');
 const JITTER_RESULT = document.getElementById('jitterResult');
 const MOS_RESULT = document.getElementById('mosScore');
+const jitterProgressDiv = document.getElementById('jitterProgressBar');
 
 let pc1, pc2; 
-let localStream; // Now a silent stream
+let localStream; 
 let statsInterval;
+let timerInterval;
 
+// --- Configuration ---
 const PC_CONFIG = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' } 
     ]
 };
+const TEST_DURATION_SECONDS = 60; 
+const STATS_COLLECTION_INTERVAL = 2000; 
+const MOS_SCORE_MAX = 4.5; // Theoretical max MOS for VoIP
 
 // --- E-Model MOS Calculation (Simplified) ---
 function calculateMos(rttMs, packetLossPct, jitterMs) {
@@ -25,34 +31,26 @@ function calculateMos(rttMs, packetLossPct, jitterMs) {
     R = Math.min(100, R);
     let MOS = 1 + (0.035 * R) + (R * (R - 60) * (100 - R) * 0.000007);
     MOS = Math.max(1.0, MOS);
-    MOS = Math.min(4.5, MOS); 
+    MOS = Math.min(MOS_SCORE_MAX, MOS); 
     return MOS;
 }
 
 // --- Audio Generation: Create a silent stream without Mic access ---
 function createSilentAudioStream() {
-    // 1. Create an AudioContext
+    if (!window.AudioContext && !window.webkitAudioContext) {
+        throw new Error("Web Audio API not supported. Cannot generate silent stream.");
+    }
     const context = new (window.AudioContext || window.webkitAudioContext)();
-    
-    // 2. Create a MediaStreamAudioDestinationNode
     const destination = context.createMediaStreamDestination();
-    
-    // 3. Create a silent sound source (Oscillator)
-    // We create an oscillator, but set the gain (volume) to 0.0001 (near silence)
-    // A gain of exactly 0 sometimes causes the browser to stop generating packets.
     const oscillator = context.createOscillator();
     const gainNode = context.createGain();
 
     oscillator.connect(gainNode);
     gainNode.connect(destination);
 
-    // Set gain to near-zero (silent)
     gainNode.gain.value = 0.0001; 
-    
-    // Start the oscillator
     oscillator.start();
     
-    // The stream is taken from the destination node
     return destination.stream;
 }
 
@@ -74,6 +72,8 @@ async function collectStats() {
         const stats = await pc2.getStats();
         let inboundRtpStats;
         let candidatePairStats;
+        let mosScore = null;
+        let jitterMs = null;
 
         stats.forEach(report => {
             if (report.type === 'inbound-rtp' && report.kind === 'audio') {
@@ -85,21 +85,22 @@ async function collectStats() {
         });
 
         if (inboundRtpStats) {
-            const jitterMs = inboundRtpStats.jitter * 1000; 
+            jitterMs = inboundRtpStats.jitter * 1000; 
             const packetsLost = inboundRtpStats.packetsLost || 0;
             const packetsReceived = inboundRtpStats.packetsReceived || 1; 
 
             const packetLossPct = (packetsLost / (packetsLost + packetsReceived)) * 100;
             const rttMs = candidatePairStats ? candidatePairStats.currentRoundTripTime * 1000 : 50; 
 
-            const mosScore = calculateMos(rttMs, packetLossPct, jitterMs);
+            mosScore = calculateMos(rttMs, packetLossPct, jitterMs);
 
             JITTER_RESULT.textContent = `${jitterMs.toFixed(2)} ms`;
             MOS_RESULT.textContent = `${mosScore.toFixed(2)}`;
-            JITTER_STATUS.textContent = `Testing... (PL: ${packetLossPct.toFixed(1)}%, RTT: ${rttMs.toFixed(0)} ms)`;
-        } else {
-            JITTER_STATUS.textContent = 'Waiting for inbound audio data...';
-        }
+            
+            // Update global results with latest readings
+            allResults.jitter.mos = mosScore;
+            allResults.jitter.jitter = jitterMs;
+        } 
 
     } catch (e) {
         console.error('getStats failed:', e);
@@ -112,32 +113,29 @@ async function runJitterTest() {
     JITTER_RESULT.textContent = '---';
     MOS_RESULT.textContent = '---';
     JITTER_STATUS.textContent = 'Starting test... (Generating silent audio packets)';
+    jitterProgressDiv.style.width = '0%';
+    document.getElementById('startJitterTest').disabled = true;
 
     // Cleanup
     if (statsInterval) clearInterval(statsInterval);
+    if (timerInterval) clearInterval(timerInterval);
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     if (pc1) pc1.close();
     if (pc2) pc2.close();
     
     try {
-        // 1. Get silent audio stream (NO MIC ACCESS REQUIRED)
         localStream = createSilentAudioStream();
 
-        // 2. Create two peer connections (Sender/Receiver)
         pc1 = new RTCPeerConnection(PC_CONFIG); 
         pc2 = new RTCPeerConnection(PC_CONFIG); 
 
-        // 3. Set up ICE Candidate exchange
         pc1.onicecandidate = onIceCandidate(pc1, pc2);
         pc2.onicecandidate = onIceCandidate(pc2, pc1);
         
-        // 4. Add the audio track to the sender (pc1)
         localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
 
-        // 5. Set up receiver to handle the incoming track
-        pc2.ontrack = (event) => { /* Track received, connection is good */ };
+        pc2.ontrack = (event) => { /* Track received */ };
         
-        // 6. Create Offer/Answer
         const offer = await pc1.createOffer();
         await pc1.setLocalDescription(offer);
         await pc2.setRemoteDescription(pc1.localDescription);
@@ -146,22 +144,36 @@ async function runJitterTest() {
         await pc2.setLocalDescription(answer);
         await pc1.setRemoteDescription(pc2.localDescription);
         
-        // 7. Start collecting stats 
+        // 7. Start collecting stats and Timer
         JITTER_STATUS.textContent = 'WebRTC Loopback Established. Collecting stats...';
-        statsInterval = setInterval(collectStats, 2000); 
-
-        // 8. Auto-stop after 20 seconds
-        setTimeout(() => {
-            clearInterval(statsInterval);
-            if (pc1) pc1.close();
-            if (pc2) pc2.close();
-            // Stop the stream generation
-            if (localStream) localStream.getTracks().forEach(track => track.stop()); 
-            JITTER_STATUS.textContent = 'Test Complete.';
-        }, 20000); 
+        statsInterval = setInterval(collectStats, STATS_COLLECTION_INTERVAL); 
+        
+        let timeLeft = TEST_DURATION_SECONDS;
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            const progressPct = ((TEST_DURATION_SECONDS - timeLeft) / TEST_DURATION_SECONDS) * 100;
+            jitterProgressDiv.style.width = `${progressPct}%`;
+            JITTER_STATUS.textContent = `Testing... (${timeLeft}s remaining)`;
+            
+            if (timeLeft <= 0) {
+                // Stop the test
+                clearInterval(statsInterval);
+                clearInterval(timerInterval);
+                if (pc1) pc1.close();
+                if (pc2) pc2.close();
+                if (localStream) localStream.getTracks().forEach(track => track.stop());
+                
+                jitterProgressDiv.style.width = '100%';
+                JITTER_STATUS.textContent = 'Test Complete.';
+                allResults.jitter.complete = true;
+                updateSummary();
+                document.getElementById('startJitterTest').disabled = false;
+            }
+        }, 1000);
 
     } catch (e) {
-        JITTER_STATUS.textContent = `Error: WebRTC setup failed. Console for details.`;
+        JITTER_STATUS.textContent = `Error: WebRTC setup failed.`;
         console.error('Jitter Test Failed:', e);
+        document.getElementById('startJitterTest').disabled = false;
     }
 }

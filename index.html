@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Internet Performance Tester</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -15,9 +16,17 @@
             <div class="test-controls">
                 <button id="startSpeedTest">Start Speed Test</button>
             </div>
+            
+            <h3>Download</h3>
+            <div class="progress-container"><div id="dlProgressBar" class="progress-bar"></div></div>
             <div class="results-display">
-                <p>Download Speed: <span id="downloadSpeed">---</span></p>
-                <p>Upload Speed: <span id="uploadSpeed">---</span></p>
+                <p>Speed: <span id="downloadSpeed">---</span></p>
+            </div>
+
+            <h3>Upload</h3>
+            <div class="progress-container"><div id="ulProgressBar" class="progress-bar"></div></div>
+            <div class="results-display">
+                <p>Speed: <span id="uploadSpeed">---</span></p>
                 <p>Latency (RTT): <span id="rttLatency">---</span></p>
             </div>
         </section>
@@ -29,13 +38,15 @@
                 <button id="startVideoTest">Start Video Test</button>
             </div>
             <div class="video-container">
-                <video id="testVideo" width="320" height="240" muted></video>
+                <video id="testVideo" width="640" height="360" muted></video>
                 <p id="videoStatus">Video will load here when test starts...</p>
             </div>
-            <div class="results-display">
+            <div class="results-display video-stats">
+                <p>Total Duration: <span id="videoTotalDuration">---</span></p>
                 <p>Initial Latency: <span id="initialLatency">---</span></p>
                 <p>Total Buffering Time: <span id="totalBufferingTime">---</span></p>
                 <p>Rebuffer Ratio: <span id="rebufferRatio">---</span></p>
+                <p>Est. Bitrate: <span id="videoCurrentBitrate">---</span></p>
             </div>
         </section>
 
@@ -44,10 +55,25 @@
             <div class="test-controls">
                 <button id="startJitterTest">Start Jitter Test</button>
             </div>
+            <div class="progress-container"><div id="jitterProgressBar" class="progress-bar"></div></div>
             <div class="results-display">
+                <p>Status: <span id="jitterStatus">Ready</span></p>
                 <p>Jitter: <span id="jitterResult">---</span></p>
                 <p>Estimated MOS Score: <span id="mosScore">---</span></p>
-                <p>Status: <span id="jitterStatus">Ready</span></p>
+            </div>
+        </section>
+
+        <section id="summary-section" class="test-module">
+            <h2>4. Summary Results & Visualization</h2>
+            <div class="results-display">
+                <p>Overall Status: <span id="overallStatus">Run tests above to see results.</span></p>
+                <p>Best MOS Score: <span id="summaryMos">---</span></p>
+            </div>
+            <div class="chart-container">
+                <canvas id="speedChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="qualityChart"></canvas>
             </div>
         </section>
 
@@ -56,5 +82,6 @@
     <script src="speedTest.js"></script>
     <script src="videoTest.js"></script>
     <script src="jitterTest.js"></script>
+    <script src="summary.js"></script> 
 </body>
 </html>

@@ -5,25 +5,27 @@ const statusDisplay = document.getElementById('videoStatus');
 const initialLatencySpan = document.getElementById('initialLatency');
 const totalBufferingTimeSpan = document.getElementById('totalBufferingTime');
 const rebufferRatioSpan = document.getElementById('rebufferRatio');
+const videoTotalDurationSpan = document.getElementById('videoTotalDuration');
+const videoCurrentBitrateSpan = document.getElementById('videoCurrentBitrate');
 
 // --- Configuration ---
-// A) CHANGE THE LOCAL FILE NAME HERE:
-const LOCAL_VIDEO_FILE = 'bigbunny1.mp4'; 
-// B) IMPORTANT: Set this to the actual duration of your LOCAL_VIDEO_FILE in seconds.
-const VIDEO_DURATION_SECONDS = 117; 
+const LOCAL_VIDEO_FILE = 'testVideo.mp4'; 
+let VIDEO_DURATION_SECONDS = 30; // UPDATED: Default to 30s 
 
 let startLoadTime = 0;
 let timeToPlay = 0;
 let totalBufferingTime = 0;
 let lastBufferingStart = 0;
 let hasPlayed = false;
+let totalRebuffers = 0;
+
 
 // --- Helper to reset and clear results ---
 function resetVideoTest() {
     videoElement.src = LOCAL_VIDEO_FILE;
     videoElement.load(); 
     videoElement.removeAttribute('controls');
-    videoElement.style.display = 'block'; // Keep visible during load
+    videoElement.style.display = 'block';
     statusDisplay.textContent = `Loading video: ${LOCAL_VIDEO_FILE}...`;
     
     // Reset metrics
@@ -32,11 +34,14 @@ function resetVideoTest() {
     totalBufferingTime = 0;
     lastBufferingStart = 0;
     hasPlayed = false;
+    totalRebuffers = 0;
 
     // Clear results
     initialLatencySpan.textContent = '---';
     totalBufferingTimeSpan.textContent = '---';
     rebufferRatioSpan.textContent = '---';
+    videoTotalDurationSpan.textContent = '---';
+    videoCurrentBitrateSpan.textContent = '---';
 }
 
 // --- Error Handling Function ---
@@ -46,6 +51,12 @@ function handleVideoError(message, error) {
     initialLatencySpan.textContent = 'ERROR';
     totalBufferingTimeSpan.textContent = 'N/A';
     rebufferRatioSpan.textContent = 'N/A';
+    videoCurrentBitrateSpan.textContent = 'N/A';
+    
+    // Update summary with failure
+    allResults.video.complete = true;
+    updateSummary();
+
     // Clean up
     videoElement.style.display = 'block';
     videoElement.setAttribute('controls', 'true');
@@ -55,21 +66,23 @@ function handleVideoError(message, error) {
 
 // --- Event Handlers ---
 
-// Error Event: Crucial for network or file loading issues
 videoElement.addEventListener('error', (e) => {
     let errorMessage = `Video playback error (Code: ${videoElement.error.code}).`;
     if (videoElement.error && videoElement.error.code === 4) {
-        errorMessage = `Video file not found or failed to load. Ensure "${LOCAL_VIDEO_FILE}" is in the root directory.`;
+        errorMessage = `Video file not found. Ensure "${LOCAL_VIDEO_FILE}" is in the root directory.`;
     }
     handleVideoError(errorMessage, e);
 });
 
-// 1. Initial Load: Start the timer when we begin loading the source
+videoElement.addEventListener('loadedmetadata', () => {
+    VIDEO_DURATION_SECONDS = videoElement.duration;
+    videoTotalDurationSpan.textContent = `${VIDEO_DURATION_SECONDS.toFixed(1)} s`;
+});
+
 videoElement.addEventListener('loadstart', () => {
     startLoadTime = performance.now();
 });
 
-// 2. Initial Latency: Fired when enough data has buffered to start playback
 videoElement.addEventListener('canplay', () => {
     if (timeToPlay === 0) {
         timeToPlay = performance.now();
@@ -81,18 +94,21 @@ videoElement.addEventListener('canplay', () => {
             handleVideoError("Autoplay blocked by browser. Please manually press play.", e);
         });
         hasPlayed = true;
+        totalRebuffers++; // Initial load is the first buffer
     }
 });
 
-// 3. Rebuffer Start: Fired when playback pauses due to lack of data
 videoElement.addEventListener('waiting', () => {
     if (hasPlayed && lastBufferingStart === 0) {
         lastBufferingStart = performance.now();
-        statusDisplay.textContent = 'Buffering...';
+        statusDisplay.textContent = `Buffering... (Rebuffers: ${totalRebuffers - 1})`;
+        if (totalRebuffers > 0) {
+             // Increment total rebuffers only after the *first* initial play
+             totalRebuffers++;
+        }
     }
 });
 
-// 4. Rebuffer End: Fired when enough data is available to resume playback
 videoElement.addEventListener('playing', () => {
     if (lastBufferingStart > 0) {
         const bufferingDuration = performance.now() - lastBufferingStart;
@@ -102,7 +118,11 @@ videoElement.addEventListener('playing', () => {
     }
 });
 
-// 5. Test Completion: Fired when the media has reached the end
+videoElement.addEventListener('timeupdate', () => {
+    // Simplified Bitrate Estimation: Placeholder since true bitrate is complex for local files.
+    videoCurrentBitrateSpan.textContent = `~ N/A (Local File)`; 
+});
+
 videoElement.addEventListener('ended', () => {
     statusDisplay.textContent = 'Test Complete.';
     
@@ -112,17 +132,24 @@ videoElement.addEventListener('ended', () => {
 
     const totalBufferingSeconds = totalBufferingTime / 1000;
     
-    if (VIDEO_DURATION_SECONDS <= 0) {
-         handleVideoError("Video duration is not set or is zero. Please update VIDEO_DURATION_SECONDS in the script.", null);
+    if (VIDEO_DURATION_SECONDS <= 0 || isNaN(VIDEO_DURATION_SECONDS)) {
+         handleVideoError("Video duration is unknown/zero. Cannot calculate ratio.", null);
          return;
     }
 
+    const initialLatencyMs = timeToPlay > 0 ? timeToPlay - startLoadTime : 0;
     const rebufferRatio = (totalBufferingSeconds / VIDEO_DURATION_SECONDS) * 100;
     
     totalBufferingTimeSpan.textContent = `${totalBufferingSeconds.toFixed(2)} s`;
-    rebufferRatioSpan.textContent = `${rebufferRatio.toFixed(2)} %`;
+    rebufferRatioSpan.textContent = `${rebufferRatio.toFixed(2)} % (${totalRebuffers - 1} times)`;
     
-    // Clean up: show controls after test is finished
+    // Update global results for the summary chart
+    allResults.video.latency = initialLatencyMs;
+    allResults.video.rebufferRatio = rebufferRatio;
+    allResults.video.complete = true;
+    updateSummary();
+
+    // Clean up
     videoElement.style.display = 'block'; 
     videoElement.setAttribute('controls', 'true');
     videoElement.pause();
@@ -131,5 +158,7 @@ videoElement.addEventListener('ended', () => {
 
 // --- Main Runner Function ---
 function runVideoTest() {
+    document.getElementById('startVideoTest').disabled = true;
     resetVideoTest(); // Clears metrics and loads video
+    document.getElementById('startVideoTest').disabled = false;
 }
