@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internet Performance Tester</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 Internet Performance Tester</h1>
+        
+        <section id="speed-test-section" class="test-module">
+            <h2>1. File Transfer Speed (DL/UL)</h2>
+            <div class="test-controls">
+                <button id="startSpeedTest">Start Speed Test</button>
+            </div>
+            <div class="results-display">
+                <p>Download Speed: <span id="downloadSpeed">---</span></p>
+                <p>Upload Speed: <span id="uploadSpeed">---</span></p>
+                <p>Latency (RTT): <span id="rttLatency">---</span></p>
+            </div>
+        </section>
+
+        <section id="video-test-section" class="test-module">
+            <h2>2. Video Streaming Quality</h2>
+            <div class="test-controls">
+                <button id="startVideoTest">Start Video Test</button>
+            </div>
+            <div class="video-container">
+                <video id="testVideo" width="320" height="240" muted></video>
+                <p id="videoStatus">Video will load here when test starts...</p>
+            </div>
+            <div class="results-display">
+                <p>Initial Latency: <span id="initialLatency">---</span></p>
+                <p>Total Buffering Time: <span id="totalBufferingTime">---</span></p>
+                <p>Rebuffer Ratio: <span id="rebufferRatio">---</span></p>
+            </div>
+        </section>
+
+        <section id="jitter-test-section" class="test-module">
+            <h2>3. VoIP Jitter & MOS Score</h2>
+            <div class="test-controls">
+                <button id="startJitterTest">Start Jitter Test</button>
+            </div>
+            <div class="results-display">
+                <p>Jitter: <span id="jitterResult">---</span></p>
+                <p>Estimated MOS Score: <span id="mosScore">---</span></p>
+                <p>Status: <span id="jitterStatus">Ready (Requires Mic Access)</span></p>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="speedTest.js"></script>
+    <script src="videoTest.js"></script>
+    <script src="jitterTest.js"></script>
+</body>
+</html>
