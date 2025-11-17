@@ -4,16 +4,16 @@ document.getElementById('startSpeedTest').addEventListener('click', runSpeedTest
 const DOWNLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 Megabytes
 const UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;   // 10 Megabytes
 
-// Arrays of reliable endpoints for fallback
-const DOWNLOAD_URLS = [
-    // Note: Use HTTPS if possible. Replace with known fast, public 50MB files.
-    `http://speedtest.tele2.net/50MB.zip?r=`, 
-    `https://ipv4.download.thinkbroadband.com/50MB.zip?r=`, 
-    `https://2.testdebit.info/50M.box?r=`
+// URLs must be provided without protocol (https://)
+const DOWNLOAD_URL_BASES = [
+    // Use URLs that have both HTTP and HTTPS versions if possible
+    'speedtest.tele2.net/50MB.zip', 
+    'ipv4.download.thinkbroadband.com/50MB.zip', 
+    '2.testdebit.info/50M.box'
 ];
 const UPLOAD_URLS = [
     'https://httpbin.org/post', // Common testing endpoint
-    'https://postman-echo.com/post' // Postman echo service
+    'https://postman-echo.com/post' 
 ];
 
 // --- UI Elements ---
@@ -36,58 +36,66 @@ async function downloadTest() {
     dlProgressDiv.style.width = '0%';
     let speedMbps = 0;
 
-    for (const baseUrl of DOWNLOAD_URLS) {
-        const url = baseUrl + Math.random();
-        
-        const startTime = performance.now();
-        let bytesTransferred = 0;
-        let lastUpdateTime = startTime;
-        let lastBytes = 0;
+    // Outer loop for URL bases
+    for (const urlBase of DOWNLOAD_URL_BASES) {
+        // Inner loop for protocol fallback (HTTPS -> HTTP)
+        for (const protocol of ['https://', 'http://']) {
+            const url = protocol + urlBase + `?r=${Math.random()}`;
+            console.log(`Attempting download from: ${url}`);
+            
+            const startTime = performance.now();
+            let bytesTransferred = 0;
+            let lastUpdateTime = startTime;
+            let lastBytes = 0;
 
-        try {
-            const response = await fetch(url, { method: 'GET', cache: 'no-store' });
+            try {
+                const response = await fetch(url, { method: 'GET', cache: 'no-store' });
 
-            if (!response.ok) throw new Error(`HTTP Status ${response.status}`);
-
-            const contentLength = response.headers.get('content-length') || DOWNLOAD_SIZE_BYTES;
-            const reader = response.body.getReader();
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                bytesTransferred += value.length;
-
-                // Live speed calculation every 100ms
-                const now = performance.now();
-                if (now - lastUpdateTime > 100) {
-                    const timeElapsedSeconds = (now - lastUpdateTime) / 1000;
-                    const instantSpeedBps = (bytesTransferred - lastBytes) / timeElapsedSeconds;
-                    dlSpeedSpan.textContent = `${bytesToMbps(instantSpeedBps)} Mbps`;
-                    
-                    // Update progress bar
-                    dlProgressDiv.style.width = `${(bytesTransferred / contentLength) * 100}%`;
-                    
-                    lastUpdateTime = now;
-                    lastBytes = bytesTransferred;
+                if (!response.ok) {
+                    throw new Error(`HTTP Status ${response.status}`);
                 }
+
+                const contentLength = response.headers.get('content-length') || DOWNLOAD_SIZE_BYTES;
+                const reader = response.body.getReader();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    bytesTransferred += value.length;
+
+                    const now = performance.now();
+                    if (now - lastUpdateTime > 100) {
+                        const timeElapsedSeconds = (now - lastUpdateTime) / 1000;
+                        const instantSpeedBps = (bytesTransferred - lastBytes) / timeElapsedSeconds;
+                        dlSpeedSpan.textContent = `${bytesToMbps(instantSpeedBps)} Mbps`;
+                        dlProgressDiv.style.width = `${(bytesTransferred / contentLength) * 100}%`;
+                        
+                        lastUpdateTime = now;
+                        lastBytes = bytesTransferred;
+                    }
+                }
+
+                const endTime = performance.now();
+                const durationSeconds = (endTime - startTime) / 1000;
+                const sizeBytes = bytesTransferred || contentLength;
+                
+                speedMbps = parseFloat(bytesToMbps(sizeBytes / durationSeconds));
+                dlSpeedSpan.textContent = `${speedMbps.toFixed(2)} Mbps`;
+                dlProgressDiv.style.width = '100%';
+                
+                console.log(`Download succeeded from ${url}`);
+                return { success: true, speedMbps }; // SUCCESS: Exit both loops
+
+            } catch (error) {
+                console.warn(`Download failed from ${url}: ${error.message}`);
+                // If it's HTTPS failure, the inner HTTP loop will run next.
+                // If it's HTTP failure, or if HTTP failed after HTTPS, the outer loop moves to the next URL base.
             }
-
-            const endTime = performance.now();
-            const durationSeconds = (endTime - startTime) / 1000;
-            const sizeBytes = bytesTransferred || contentLength;
-            
-            speedMbps = parseFloat(bytesToMbps(sizeBytes / durationSeconds));
-            dlSpeedSpan.textContent = `${speedMbps.toFixed(2)} Mbps`;
-            dlProgressDiv.style.width = '100%';
-            
-            return { success: true, speedMbps };
-
-        } catch (error) {
-            console.warn(`Download failed from ${url}: ${error.message}`);
         }
     }
     
+    // If all loops finish without success
     dlSpeedSpan.textContent = `ERROR: All DL URLs failed.`;
     dlProgressDiv.style.width = '0%';
     return { success: false, speedMbps };
@@ -99,6 +107,7 @@ async function uploadTest() {
     ulProgressDiv.style.width = '0%';
     let speedMbps = 0;
     
+    // Generate a dummy data array (10MB) to upload
     const uploadData = new ArrayBuffer(UPLOAD_SIZE_BYTES);
     const dataView = new DataView(uploadData);
     for (let i = 0; i < UPLOAD_SIZE_BYTES; i++) {
@@ -106,6 +115,7 @@ async function uploadTest() {
     }
     
     for (const url of UPLOAD_URLS) {
+        console.log(`Attempting upload to: ${url}`);
         const startTime = performance.now();
         let lastUpdateTime = startTime;
         let totalProgress = 0;
@@ -150,7 +160,7 @@ async function uploadTest() {
             ulSpeedSpan.textContent = `${speedMbps.toFixed(2)} Mbps`;
             ulProgressDiv.style.width = '100%';
 
-            return { success: true, speedMbps };
+            return { success: true, speedMbps }; // SUCCESS: Exit loop
 
         } catch (error) {
             console.warn(`Upload failed to ${url}: ${error.message}`);
@@ -167,28 +177,38 @@ async function latencyTest(iterations = 10) {
     rttLatencySpan.textContent = 'TESTING...';
     let totalRtt = 0;
     let avgRtt = null;
+    let success = false;
 
-    // Use the first reliable download URL for RTT check
-    const testUrlBase = DOWNLOAD_URLS[0].split('?')[0]; 
+    // Use the first reliable download URL base for RTT check
+    for (const urlBase of DOWNLOAD_URL_BASES) {
+        for (const protocol of ['https://', 'http://']) {
+            const testUrlBase = protocol + urlBase;
+            
+            try {
+                // Run multiple iterations
+                for (let i = 0; i < iterations; i++) {
+                    const testUrl = `${testUrlBase}?cachebust=${Math.random()}`;
+                    const startTime = performance.now();
+                    // Use HEAD request for minimal data transfer
+                    await fetch(testUrl, { method: 'HEAD', cache: 'no-store' }); 
+                    const endTime = performance.now();
+                    totalRtt += (endTime - startTime);
+                }
 
-    try {
-        for (let i = 0; i < iterations; i++) {
-            const testUrl = `${testUrlBase}?cachebust=${Math.random()}`;
-            const startTime = performance.now();
-            await fetch(testUrl, { method: 'HEAD', cache: 'no-store' }); 
-            const endTime = performance.now();
-            totalRtt += (endTime - startTime);
+                avgRtt = totalRtt / iterations;
+                rttLatencySpan.textContent = `${avgRtt.toFixed(1)} ms`;
+                success = true;
+                return { success: true, avgRtt }; // SUCCESS: Exit loops
+
+            } catch (error) {
+                console.warn(`Latency check failed for ${testUrlBase}: ${error.message}`);
+                // Try next protocol/URL
+            }
         }
-
-        avgRtt = totalRtt / iterations;
-        rttLatencySpan.textContent = `${avgRtt.toFixed(1)} ms`;
-        return { success: true, avgRtt };
-
-    } catch (error) {
-        rttLatencySpan.textContent = `ERROR: Latency check failed.`;
-        console.error('Latency Test Failed:', error);
-        return { success: false, avgRtt };
     }
+    
+    rttLatencySpan.textContent = `ERROR: Latency check failed.`;
+    return { success: false, avgRtt };
 }
 
 // --- Main Runner Function ---

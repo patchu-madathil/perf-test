@@ -9,8 +9,8 @@ const videoTotalDurationSpan = document.getElementById('videoTotalDuration');
 const videoCurrentBitrateSpan = document.getElementById('videoCurrentBitrate');
 
 // --- Configuration ---
-const LOCAL_VIDEO_FILE = 'testVideo.mp4'; 
-let VIDEO_DURATION_SECONDS = 30; // UPDATED: Default to 30s 
+const LOCAL_VIDEO_FILE = 'bigbunny1.mp4'; 
+let VIDEO_DURATION_SECONDS = 117; // UPDATED: 117 seconds playback duration
 
 let startLoadTime = 0;
 let timeToPlay = 0;
@@ -40,7 +40,7 @@ function resetVideoTest() {
     initialLatencySpan.textContent = '---';
     totalBufferingTimeSpan.textContent = '---';
     rebufferRatioSpan.textContent = '---';
-    videoTotalDurationSpan.textContent = '---';
+    videoTotalDurationSpan.textContent = `${VIDEO_DURATION_SECONDS.toFixed(1)} s`; // Show known duration
     videoCurrentBitrateSpan.textContent = '---';
 }
 
@@ -53,7 +53,6 @@ function handleVideoError(message, error) {
     rebufferRatioSpan.textContent = 'N/A';
     videoCurrentBitrateSpan.textContent = 'N/A';
     
-    // Update summary with failure
     allResults.video.complete = true;
     updateSummary();
 
@@ -75,7 +74,10 @@ videoElement.addEventListener('error', (e) => {
 });
 
 videoElement.addEventListener('loadedmetadata', () => {
-    VIDEO_DURATION_SECONDS = videoElement.duration;
+    // If the metadata provides a duration, use it, otherwise keep the defined constant
+    if (videoElement.duration > 0) {
+        VIDEO_DURATION_SECONDS = videoElement.duration;
+    }
     videoTotalDurationSpan.textContent = `${VIDEO_DURATION_SECONDS.toFixed(1)} s`;
 });
 
@@ -94,18 +96,18 @@ videoElement.addEventListener('canplay', () => {
             handleVideoError("Autoplay blocked by browser. Please manually press play.", e);
         });
         hasPlayed = true;
-        totalRebuffers++; // Initial load is the first buffer
+        totalRebuffers++; 
     }
 });
 
 videoElement.addEventListener('waiting', () => {
     if (hasPlayed && lastBufferingStart === 0) {
         lastBufferingStart = performance.now();
-        statusDisplay.textContent = `Buffering... (Rebuffers: ${totalRebuffers - 1})`;
-        if (totalRebuffers > 0) {
-             // Increment total rebuffers only after the *first* initial play
+        // Check if this is the first buffer after the initial play
+        if (totalRebuffers > 0) { 
              totalRebuffers++;
         }
+        statusDisplay.textContent = `Buffering... (Rebuffers: ${totalRebuffers - 1})`;
     }
 });
 
@@ -119,7 +121,6 @@ videoElement.addEventListener('playing', () => {
 });
 
 videoElement.addEventListener('timeupdate', () => {
-    // Simplified Bitrate Estimation: Placeholder since true bitrate is complex for local files.
     videoCurrentBitrateSpan.textContent = `~ N/A (Local File)`; 
 });
 

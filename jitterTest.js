@@ -10,6 +10,10 @@ let localStream;
 let statsInterval;
 let timerInterval;
 
+// Variables to store final 60-second results for MOS calculation
+let finalMos = null;
+let finalJitter = null;
+
 // --- Configuration ---
 const PC_CONFIG = {
     iceServers: [
@@ -18,7 +22,7 @@ const PC_CONFIG = {
 };
 const TEST_DURATION_SECONDS = 60; 
 const STATS_COLLECTION_INTERVAL = 2000; 
-const MOS_SCORE_MAX = 4.5; // Theoretical max MOS for VoIP
+const MOS_SCORE_MAX = 4.5; 
 
 // --- E-Model MOS Calculation (Simplified) ---
 function calculateMos(rttMs, packetLossPct, jitterMs) {
@@ -64,7 +68,7 @@ function onIceCandidate(peerA, peerB) {
     };
 }
 
-// --- Stats Collection ---
+// --- Stats Collection (Real-time update) ---
 async function collectStats() {
     if (!pc2) return; 
 
@@ -72,8 +76,6 @@ async function collectStats() {
         const stats = await pc2.getStats();
         let inboundRtpStats;
         let candidatePairStats;
-        let mosScore = null;
-        let jitterMs = null;
 
         stats.forEach(report => {
             if (report.type === 'inbound-rtp' && report.kind === 'audio') {
@@ -85,21 +87,24 @@ async function collectStats() {
         });
 
         if (inboundRtpStats) {
-            jitterMs = inboundRtpStats.jitter * 1000; 
+            const jitterMs = inboundRtpStats.jitter * 1000; 
             const packetsLost = inboundRtpStats.packetsLost || 0;
             const packetsReceived = inboundRtpStats.packetsReceived || 1; 
 
             const packetLossPct = (packetsLost / (packetsLost + packetsReceived)) * 100;
             const rttMs = candidatePairStats ? candidatePairStats.currentRoundTripTime * 1000 : 50; 
 
-            mosScore = calculateMos(rttMs, packetLossPct, jitterMs);
+            // Calculate MOS for real-time display (running average)
+            const mosScore = calculateMos(rttMs, packetLossPct, jitterMs);
 
+            // Real-time UI Update
+            JITTER_STATUS.textContent = `Testing... PL: ${packetLossPct.toFixed(1)}%, RTT: ${rttMs.toFixed(0)} ms`;
             JITTER_RESULT.textContent = `${jitterMs.toFixed(2)} ms`;
-            MOS_RESULT.textContent = `${mosScore.toFixed(2)}`;
+            MOS_RESULT.textContent = `${mosScore.toFixed(2)} (Live)`; 
             
-            // Update global results with latest readings
-            allResults.jitter.mos = mosScore;
-            allResults.jitter.jitter = jitterMs;
+            // Store the latest full reading (will be the final average when the timer ends)
+            finalMos = mosScore;
+            finalJitter = jitterMs;
         } 
 
     } catch (e) {
@@ -123,6 +128,10 @@ async function runJitterTest() {
     if (pc1) pc1.close();
     if (pc2) pc2.close();
     
+    // Reset final variables
+    finalMos = null;
+    finalJitter = null;
+
     try {
         localStream = createSilentAudioStream();
 
@@ -156,17 +165,26 @@ async function runJitterTest() {
             JITTER_STATUS.textContent = `Testing... (${timeLeft}s remaining)`;
             
             if (timeLeft <= 0) {
-                // Stop the test
+                // Final calculation and UI update after 60s run
                 clearInterval(statsInterval);
                 clearInterval(timerInterval);
+                
+                JITTER_RESULT.textContent = `${finalJitter.toFixed(2)} ms`;
+                MOS_RESULT.textContent = `${finalMos.toFixed(2)}`; // Final result without "(Live)"
+
+                // Update global results for the summary chart (Only after full run)
+                allResults.jitter.mos = finalMos;
+                allResults.jitter.jitter = finalJitter;
+                allResults.jitter.complete = true;
+                updateSummary();
+                
+                // Cleanup
                 if (pc1) pc1.close();
                 if (pc2) pc2.close();
                 if (localStream) localStream.getTracks().forEach(track => track.stop());
                 
                 jitterProgressDiv.style.width = '100%';
                 JITTER_STATUS.textContent = 'Test Complete.';
-                allResults.jitter.complete = true;
-                updateSummary();
                 document.getElementById('startJitterTest').disabled = false;
             }
         }, 1000);
