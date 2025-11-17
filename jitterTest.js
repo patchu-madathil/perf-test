@@ -4,13 +4,11 @@ const JITTER_STATUS = document.getElementById('jitterStatus');
 const JITTER_RESULT = document.getElementById('jitterResult');
 const MOS_RESULT = document.getElementById('mosScore');
 
-let pc1, pc2; // Peer Connections for the loopback
-let localStream;
+let pc1, pc2; 
+let localStream; // Now a silent stream
 let statsInterval;
 
-// --- WebRTC Configuration ---
 const PC_CONFIG = {
-    // A STUN server is still needed to determine the client's public IP/port candidates.
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' } 
     ]
@@ -18,7 +16,6 @@ const PC_CONFIG = {
 
 // --- E-Model MOS Calculation (Simplified) ---
 function calculateMos(rttMs, packetLossPct, jitterMs) {
-    // ... (Use the same MOS calculation function as before) ...
     const Ro = 93.2; 
     const Id = rttMs > 100 ? (rttMs / 4 - 25) : 0; 
     const Ie = packetLossPct > 1 ? 15 + packetLossPct : packetLossPct;
@@ -32,9 +29,34 @@ function calculateMos(rttMs, packetLossPct, jitterMs) {
     return MOS;
 }
 
-// --- Manual Signaling Logic for Loopback ---
+// --- Audio Generation: Create a silent stream without Mic access ---
+function createSilentAudioStream() {
+    // 1. Create an AudioContext
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // 2. Create a MediaStreamAudioDestinationNode
+    const destination = context.createMediaStreamDestination();
+    
+    // 3. Create a silent sound source (Oscillator)
+    // We create an oscillator, but set the gain (volume) to 0.0001 (near silence)
+    // A gain of exactly 0 sometimes causes the browser to stop generating packets.
+    const oscillator = context.createOscillator();
+    const gainNode = context.createGain();
 
-// Sends the generated ICE candidate from one peer to the other
+    oscillator.connect(gainNode);
+    gainNode.connect(destination);
+
+    // Set gain to near-zero (silent)
+    gainNode.gain.value = 0.0001; 
+    
+    // Start the oscillator
+    oscillator.start();
+    
+    // The stream is taken from the destination node
+    return destination.stream;
+}
+
+// --- Manual Signaling for Loopback ---
 function onIceCandidate(peerA, peerB) {
     return (event) => {
         if (event.candidate) {
@@ -46,7 +68,6 @@ function onIceCandidate(peerA, peerB) {
 
 // --- Stats Collection ---
 async function collectStats() {
-    // Use the receiving peer (pc2) to get statistics, as it represents the 'inbound' VoIP stream.
     if (!pc2) return; 
 
     try {
@@ -64,14 +85,11 @@ async function collectStats() {
         });
 
         if (inboundRtpStats) {
-            // Jitter is reported in seconds, convert to milliseconds
             const jitterMs = inboundRtpStats.jitter * 1000; 
             const packetsLost = inboundRtpStats.packetsLost || 0;
             const packetsReceived = inboundRtpStats.packetsReceived || 1; 
 
             const packetLossPct = (packetsLost / (packetsLost + packetsReceived)) * 100;
-            
-            // RTT from the established connection pair
             const rttMs = candidatePairStats ? candidatePairStats.currentRoundTripTime * 1000 : 50; 
 
             const mosScore = calculateMos(rttMs, packetLossPct, jitterMs);
@@ -93,36 +111,33 @@ async function collectStats() {
 async function runJitterTest() {
     JITTER_RESULT.textContent = '---';
     MOS_RESULT.textContent = '---';
-    JITTER_STATUS.textContent = 'Starting test... (Microphone required)';
-    console.log('--- Starting WebRTC Loopback Jitter Test ---');
+    JITTER_STATUS.textContent = 'Starting test... (Generating silent audio packets)';
 
-    // Clean up previous test
+    // Cleanup
     if (statsInterval) clearInterval(statsInterval);
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     if (pc1) pc1.close();
     if (pc2) pc2.close();
     
     try {
-        // 1. Get audio stream (mic access required)
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        // 1. Get silent audio stream (NO MIC ACCESS REQUIRED)
+        localStream = createSilentAudioStream();
 
-        // 2. Create two peer connections
-        pc1 = new RTCPeerConnection(PC_CONFIG); // Sender
-        pc2 = new RTCPeerConnection(PC_CONFIG); // Receiver
+        // 2. Create two peer connections (Sender/Receiver)
+        pc1 = new RTCPeerConnection(PC_CONFIG); 
+        pc2 = new RTCPeerConnection(PC_CONFIG); 
 
-        // 3. Set up ICE Candidate exchange for loopback (manual signaling)
+        // 3. Set up ICE Candidate exchange
         pc1.onicecandidate = onIceCandidate(pc1, pc2);
         pc2.onicecandidate = onIceCandidate(pc2, pc1);
         
-        // 4. Add the audio track from the local stream to the sender (pc1)
+        // 4. Add the audio track to the sender (pc1)
         localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
 
-        // 5. Set up receiver to get the stream (to complete the connection)
-        pc2.ontrack = (event) => {
-            console.log('Receiver got track:', event.track);
-        };
+        // 5. Set up receiver to handle the incoming track
+        pc2.ontrack = (event) => { /* Track received, connection is good */ };
         
-        // 6. Create Offer/Answer (manual signaling)
+        // 6. Create Offer/Answer
         const offer = await pc1.createOffer();
         await pc1.setLocalDescription(offer);
         await pc2.setRemoteDescription(pc1.localDescription);
@@ -131,22 +146,22 @@ async function runJitterTest() {
         await pc2.setLocalDescription(answer);
         await pc1.setRemoteDescription(pc2.localDescription);
         
-        // 7. Start collecting stats once negotiation is complete
+        // 7. Start collecting stats 
         JITTER_STATUS.textContent = 'WebRTC Loopback Established. Collecting stats...';
-        statsInterval = setInterval(collectStats, 2000); // Check every 2 seconds
+        statsInterval = setInterval(collectStats, 2000); 
 
         // 8. Auto-stop after 20 seconds
         setTimeout(() => {
             clearInterval(statsInterval);
             if (pc1) pc1.close();
             if (pc2) pc2.close();
-            if (localStream) localStream.getTracks().forEach(track => track.stop());
+            // Stop the stream generation
+            if (localStream) localStream.getTracks().forEach(track => track.stop()); 
             JITTER_STATUS.textContent = 'Test Complete.';
-            console.log('--- Jitter Test Complete ---');
         }, 20000); 
 
     } catch (e) {
-        JITTER_STATUS.textContent = `Error: Cannot access microphone or WebRTC failed. (Must be run on HTTPS)`;
+        JITTER_STATUS.textContent = `Error: WebRTC setup failed. Console for details.`;
         console.error('Jitter Test Failed:', e);
     }
 }
